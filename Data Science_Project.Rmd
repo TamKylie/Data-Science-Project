@@ -1,0 +1,197 @@
+---
+title: "Data Science_Project \nClustering Analysis of COVID-19 Spread in Malaysia: Identifying High-Risk Regions for Children and Adolescents. "
+author: "Tam Kylie, Ooi Chiao Ee, Anis Farida Binti Ahmad Baharin, Nur Ainin Sofiya Binti Tukiran "
+date: "2023-11-25"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r covid_data}
+
+#steps:
+# Load libraries
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+
+# Data preparation
+# This is the covid-19 data from date 25/1/2020 to 18/11/2023
+# Read as csv file which is a text file format that
+# uses commas to separate values.
+covid_data <- read.csv("C:/Users/60162/Downloads/cases_state.csv", header = TRUE)
+
+# Data preprocessing
+# Create a 'Region' Variable based on the 'state' variable
+# Classify regions based on the states
+covid_data <- covid_data %>%
+  mutate(Region = case_when(
+    state %in% c("Johor", "Melaka", "Negeri Sembilan", 
+                 "Pahang", "Selangor", "Terengganu",
+                 "W.P. Kuala Lumpur", "W.P. Labuan", "W.P. Putrajaya") ~ "East Malaysia",
+    state %in% c("Kedah", "Perlis", "Pulau Pinang", "Kelantan", "Perak") ~ "North Malaysia",
+    state %in% c("Sabah", "Sarawak") ~ "West Malaysia",
+    TRUE ~ "Other"
+  ))
+
+
+# Data Exploration(descriptive)
+# To understand the characteristics of the dataset
+# Display structure of the dataset
+str(covid_data)
+
+# Display the first few rows of the dataset
+head(covid_data)
+
+# Display the class of the dataset
+class(covid_data)
+
+# Display summary statistics of the dataset
+summary(covid_data)
+
+# Display the class of each variable in the dataset
+sapply(covid_data, class)
+
+
+# Remove rows with NAs
+# Remove rows with missing values to ensure data quality
+covid_data <- na.omit(covid_data)
+
+# Take a look at the scatter plot for new cases(cases_new) 
+# and recovered cases(cases_recovered)
+plot(covid_data$cases_new ~ covid_data$cases_recovered, data = covid_data)
+with(covid_data, text(covid_data$cases_new~ covid_data$cases_recovered, 
+                      labels = covid_data$Region, pos = 4))
+ 
+
+# Select the features for analysis
+# Select relevant features for clustering analysis
+selected_features <- covid_data %>%
+  filter(Region %in% c("East Malaysia", "North Malaysia", "West Malaysia")) %>%
+  select(state, Region, cases_child, cases_adolescent)
+
+# Drop rows with missing values
+# Remove any remaining rows with missing values in the selected features
+selected_features <- selected_features %>%
+  drop_na()
+
+# Normalize the data
+# Standardize the selected features for better performance in k-means clustering
+normalized_features <- scale(selected_features[, c("cases_child", "cases_adolescent")])
+
+# Calculate distance matrix
+# Calculate the pairwise distances between observations in the normalized features
+distance = dist(normalized_features)
+
+
+# Elbow Method
+# Determine the optimal number of clusters using the elbow method
+wcss_values <- numeric(10)
+
+#create another features which contains only numeric value
+wanted_features <- covid_data[,c("cases_child", "cases_adolescent")]
+
+# Iterate through different cluster numbers
+for (i in 1:10) {
+  kmeans_model <- kmeans(wanted_features, centers = i)
+  wcss_values[i] <- kmeans_model$tot.withinss
+}
+
+# Plot Elbow Method
+# Visualize the within-cluster sum of squares for different cluster numbers
+plot(1:10, wcss_values, type = "b", pch = 19, frame = FALSE, main = "Elbow Method",
+     xlab = "Number of Clusters", ylab = "Within-Cluster Sum of Squares")
+
+
+# Determine the number of clusters and perform the k-means clustering
+set.seed(200)
+k <- 3  
+kmeans_model <- kmeans(normalized_features, centers = k)
+
+# Add cluster assignments to the original dataset
+segmented_data <- cbind(selected_features, Cluster = kmeans_model$cluster)
+
+# Create a new variable 'cluster_names' for descriptive cluster names
+cluster_names <- c("Low Risk", "Moderate Risk", "High Risk")
+
+# Add descriptive cluster names
+segmented_data <- mutate(segmented_data, ClusterName = cluster_names[Cluster])
+
+
+# Visualize Clusters
+# Create a scatter plot to visualize the clustering results, faceted by 'Region'
+ggplot(segmented_data, aes(x = cases_child, y = cases_adolescent, col = ClusterName)) +
+  geom_point() +
+  facet_wrap(~Region) +
+  labs(title = "K-Means Clustering of COVID-19 Cases by Region",
+       x = "Cases in Child Age Group", y = "Cases in Adolescent Age Group")
+
+
+# Iterative K-Means and Visualization
+# Perform iterative k-means with different random starts and visualize results
+n_iterations <- 25
+wss <- sapply(1:n_iterations, function(iteration){
+  #Set a different random seed for each iteration
+  set.seed(iteration)
+  kmeans_model <- kmeans(wanted_features, centers = k, nstart = 1)  # nstart = 1 for reproducibility
+  
+  # Access cluster assignments
+  cluster_assignments <- kmeans_model$cluster
+  
+  # Return the cluster assignments for this iteration
+  return(cluster_assignments)
+})
+
+#Display the first few rows of wss
+head(wss)
+
+# Define a color palette for clusters
+cluster_colors <- c("red", "green", "blue")
+
+# Visualize the results (example for 2D data)
+par(mfrow=c(2, 2))  # Set up a 2x2 grid for subplots
+
+for (i in 1:n_iterations) {
+  
+  # Scatter plot with consistent colors for clusters
+  plot(wanted_features, col = cluster_colors[wss[, i]], main = paste("Iteration", i),
+       xlab = "cases_child", ylab = "cases_adolescent")
+
+}
+
+# Print out the cluster analysis and result
+# Check the size of each cluster
+table(segmented_data$ClusterName)
+
+# Identify the high-risk regions and their counts in each cluster
+high_risk_regions <- segmented_data %>%
+  filter(ClusterName == "High Risk") %>%
+  group_by(Region) %>%
+  tally()
+
+# Display the high-risk regions and their counts
+print("High-Risk Regions and Their Counts:")
+print(high_risk_regions)
+
+# Identify the region with the highest risk in the High Risk cluster
+max_risk_region <- segmented_data %>%
+  filter(ClusterName == "High Risk") %>%
+  group_by(Region) %>%
+  tally() %>%
+  arrange(desc(n)) %>%
+  slice(1)
+
+# Display the region with the highest risk in the High Risk cluster
+print("Region with the Highest Risk in High Risk Cluster:")
+print(max_risk_region)
+
+
+```
